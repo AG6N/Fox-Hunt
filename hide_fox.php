@@ -1,0 +1,336 @@
+<?php
+// hide_fox.php - Fixed duplicate counting
+require_once 'config.php';
+
+// Require login - redirects to login.php if not logged in
+requireLogin();
+
+// Clean up expired foxes
+cleanupExpiredFoxes();
+
+$error = '';
+$success = false;
+
+if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+    $grid_square = strtoupper(trim($_POST['grid_square']));
+    $frequency = trim($_POST['frequency']);
+    $mode = strtoupper(trim($_POST['mode']));
+    $rf_power = trim($_POST['rf_power']);
+    $notes = trim($_POST['notes']);
+    $expire_days = intval($_POST['expire_days'] ?? 7);
+    $expire_hours = intval($_POST['expire_hours'] ?? 0);
+    
+    $valid_grid = validateGridSquare($grid_square);
+    $valid_frequency = validateFrequency($frequency);
+    $valid_mode = validateMode($mode);
+    $valid_rf = validateRFPower($rf_power);
+    $valid_notes = validateNotes($notes);
+    
+    if (!$valid_grid) {
+        $error = "Invalid grid square format. Use 6 alphanumeric characters (e.g., FN31pr, 123456, AB12CD)";
+    } elseif (!$valid_frequency) {
+        $error = "Invalid frequency format. Use up to 8 characters (e.g., 146.520, 446.000, 144.300)";
+    } elseif (!$valid_mode) {
+        $error = "Invalid mode. Use 2-4 characters (e.g., FM, SSB, CW, AM)";
+    } elseif (!$valid_rf) {
+        $error = "Invalid RF power. Use up to 5 alphanumeric characters (e.g., 5W, 10W, 100mW, 1.5W)";
+    } else {
+        // Generate unique serial number
+        $serial_number = generateSerialNumber();
+        
+        // Calculate expiration date
+        $expires_at = calculateExpiration($expire_days, $expire_hours);
+        
+        try {
+            $db = getDB();
+            
+            // Insert fox using current user's ID
+            $stmt = $db->prepare("INSERT INTO foxes (serial_number, grid_square, frequency, mode, rf_power, notes, hidden_by, expires_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)");
+            $stmt->execute([$serial_number, $valid_grid, $valid_frequency, $valid_mode, $valid_rf, $valid_notes, $_SESSION['user_id'], $expires_at]);
+            
+            // REMOVED: Don't manually update foxes_hidden - the trigger does this
+            // $stmt = $db->prepare("UPDATE users SET foxes_hidden = foxes_hidden + 1 WHERE id = ?");
+            // $stmt->execute([$_SESSION['user_id']]);
+            
+            // Store success data in session
+            $_SESSION['last_hidden_fox'] = [
+                'serial_number' => $serial_number,
+                'grid_square' => $valid_grid,
+                'frequency' => $valid_frequency,
+                'mode' => $valid_mode,
+                'rf_power' => $valid_rf,
+                'notes' => $valid_notes,
+                'expires_at' => $expires_at
+            ];
+            
+            header('Location: hide_fox.php?success=1');
+            exit;
+        } catch (PDOException $e) {
+            $error = "Error hiding fox: " . $e->getMessage();
+        }
+    }
+}
+
+// Check for success message
+if (isset($_GET['success']) && isset($_SESSION['last_hidden_fox'])) {
+    $success = true;
+    $fox_data = $_SESSION['last_hidden_fox'];
+}
+?>
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Hide a Fox - Foxhunt</title>
+    <link rel="stylesheet" href="styles.css">
+    <style>
+        .frequency-examples {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 10px;
+            margin-top: 5px;
+        }
+        
+        .frequency-example {
+            background: #e3f2fd;
+            padding: 5px 10px;
+            border-radius: 3px;
+            font-size: 0.9em;
+            border: 1px solid #bbdefb;
+        }
+        
+        .mode-examples {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 10px;
+            margin-top: 5px;
+        }
+        
+        .mode-example {
+            background: #e8f5e9;
+            padding: 5px 10px;
+            border-radius: 3px;
+            font-size: 0.9em;
+            border: 1px solid #c8e6c9;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>🦊 Hide a Fox</h1>
+            <div class="header-actions">
+                <span class="user-info">Welcome, <?php echo htmlspecialchars($_SESSION['username']); ?>!</span>
+                <a href="index.php" class="btn btn-secondary">← Home</a>
+                <a href="my_foxes.php" class="btn btn-info">My Foxes</a>
+                <?php if (isAdmin()): ?>
+                    <a href="admin.php" class="btn btn-warning">Admin</a>
+                <?php endif; ?>
+                <a href="logout.php" class="btn btn-secondary">Logout</a>
+            </div>
+        </header>
+
+        <?php if (isset($_GET['success']) && $success): ?>
+            <div class="success-message">
+                <h3>✅ Fox Successfully Hidden!</h3>
+                <div class="fox-details">
+                    <p><strong>Serial Number:</strong> 
+                        <span id="serialNumber" class="highlight serial-number"><?php echo $fox_data['serial_number']; ?></span>
+                        <button onclick="copySerialNumber()" class="btn btn-info btn-small">Copy</button>
+                    </p>
+                    <p><strong>Grid Square:</strong> <span class="highlight"><?php echo $fox_data['grid_square']; ?></span></p>
+                    <p><strong>Frequency:</strong> <span class="highlight"><?php echo $fox_data['frequency']; ?> MHz</span></p>
+                    <p><strong>Mode:</strong> <?php echo htmlspecialchars($fox_data['mode']); ?></p>
+                    <p><strong>RF Power:</strong> <?php echo htmlspecialchars($fox_data['rf_power']); ?></p>
+                    <?php if ($fox_data['notes']): ?>
+                        <p><strong>Notes:</strong> <?php echo htmlspecialchars($fox_data['notes']); ?></p>
+                    <?php endif; ?>
+                    <p><strong>Expires:</strong> <?php echo date('M d, Y H:i', strtotime($fox_data['expires_at'])); ?></p>
+                    <p><strong>Hidden By:</strong> <?php echo htmlspecialchars($_SESSION['username']); ?></p>
+                </div>
+                <div class="warning-box">
+                    <h4>⚠️ Important!</h4>
+                    <p>Save the serial number! Only share the grid square, frequency, and mode with hunters.</p>
+                    <p>The serial number is required to verify finds.</p>
+                </div>
+                <div class="action-buttons">
+                    <a href="hide_fox.php" class="btn btn-primary">Hide Another Fox</a>
+                    <a href="my_foxes.php" class="btn btn-info">View My Foxes</a>
+                    <a href="find_fox.php" class="btn btn-success">Find Foxes</a>
+                </div>
+            </div>
+            
+<script>
+function copySerialNumber() {
+    const serial = document.getElementById('serialNumber').textContent;
+    
+    // Fallback method for older browsers
+    const copyToClipboard = (text) => {
+        if (navigator.clipboard && window.isSecureContext) {
+            // Use modern clipboard API
+            return navigator.clipboard.writeText(text);
+        } else {
+            // Fallback for older browsers
+            const textArea = document.createElement('textarea');
+            textArea.value = text;
+            textArea.style.position = 'fixed';
+            textArea.style.left = '-999999px';
+            textArea.style.top = '-999999px';
+            document.body.appendChild(textArea);
+            textArea.focus();
+            textArea.select();
+            
+            try {
+                document.execCommand('copy');
+                return Promise.resolve();
+            } catch (err) {
+                return Promise.reject(err);
+            } finally {
+                document.body.removeChild(textArea);
+            }
+        }
+    };
+    
+    copyToClipboard(serial).then(() => {
+        const btn = event.target;
+        const originalText = btn.textContent;
+        const originalClass = btn.className;
+        
+        btn.textContent = 'Copied!';
+        btn.className = 'btn btn-success btn-small';
+        
+        setTimeout(() => {
+            btn.textContent = originalText;
+            btn.className = originalClass;
+        }, 2000);
+    }).catch(err => {
+        alert('Failed to copy: ' + err);
+    });
+}
+</script>
+
+            
+            <?php 
+            // Clear the success data after displaying
+            unset($_SESSION['last_hidden_fox']);
+            ?>
+            
+        <?php else: ?>
+            <div class="form-container">
+                <h2>Hide a New Transmitter</h2>
+                <p>Enter the details for your hidden transmitter.</p>
+                
+                <?php if ($error): ?>
+                    <div class="error-message"><?php echo $error; ?></div>
+                <?php endif; ?>
+                
+                <form method="POST" action="hide_fox.php">
+                    <div class="form-group">
+                        <label for="grid_square">Grid Square (6 alphanumeric characters): *</label>
+                        <input type="text" id="grid_square" name="grid_square" 
+                               placeholder="e.g., FN31pr, 123456, AB12CD" required
+                               pattern="[A-Za-z0-9]{6}"
+                               title="6 alphanumeric characters"
+                               style="text-transform: uppercase">
+                        <small>Examples: FN31pr, JN76bh, 123456, AB12CD</small>
+                    </div>
+                    
+                    <div class="form-group">
+                        <label for="frequency">Frequency (MHz, up to 8 characters): *</label>
+                        <input type="text" id="frequency" name="frequency" 
+                               placeholder="e.g., 146.520, 446.000, 144.300" 
+                               pattern="\d{1,4}\.\d{1,3}|\d{3,8}"
+                               title="Frequency in MHz (e.g., 146.520)"
+                               value="146.520"
+                               required>
+                        <div class="frequency-examples">
+                            <span class="frequency-example">146.520 (2m FM)</span>
+                            <span class="frequency-example">446.000 (70cm FM)</span>
+                            <span class="frequency-example">144.300 (2m SSB)</span>
+                            <span class="frequency-example">7.100 (40m CW)</span>
+                            <span class="frequency-example">1296.0 (23cm)</span>
+                        </div>
+                    </div>
+                    
+                    <div class="form-group">
+                        <label for="mode">Mode (2-4 characters): *</label>
+                        <input type="text" id="mode" name="mode" 
+                               placeholder="e.g., FM, SSB, CW, AM" 
+                               pattern="[A-Z]{2,4}"
+                               title="2-4 character mode"
+                               value="FM"
+                               required
+                               style="text-transform: uppercase">
+                        <div class="mode-examples">
+                            <span class="mode-example">FM (Frequency Modulation)</span>
+                            <span class="mode-example">SSB (Single Sideband)</span>
+                            <span class="mode-example">CW (Continuous Wave/Morse)</span>
+                            <span class="mode-example">AM (Amplitude Modulation)</span>
+                            <span class="mode-example">USB (Upper Sideband)</span>
+                            <span class="mode-example">LSB (Lower Sideband)</span>
+                        </div>
+                    </div>
+                    
+                    <div class="form-group">
+                        <label for="rf_power">RF Power (up to 5 characters): *</label>
+                        <input type="text" id="rf_power" name="rf_power" 
+                               placeholder="e.g., 5W, 10W, 100mW, 1.5W" 
+                               pattern="[A-Za-z0-9]{1,5}"
+                               title="Up to 5 alphanumeric characters"
+                               value="5W"
+                               required>
+                        <small>Examples: 5W, 10W, 1W, 100mW, 1.5W, 50W, 100W</small>
+                    </div>
+                    
+                    <div class="form-group">
+                        <label for="notes">Notes (optional, up to 25 characters):</label>
+                        <input type="text" id="notes" name="notes" 
+                               placeholder="e.g., Near oak tree, under bench"
+                               maxlength="25">
+                        <small>Brief description or hint (optional)</small>
+                    </div>
+                    
+                    <div class="form-group">
+                        <label>Expiration Time: *</label>
+                        <div class="expiration-inputs">
+                            <div>
+                                <label for="expire_days">Days:</label>
+                                <input type="number" id="expire_days" name="expire_days" 
+                                       min="0" max="30" value="7" required>
+                            </div>
+                            <div>
+                                <label for="expire_hours">Hours:</label>
+                                <input type="number" id="expire_hours" name="expire_hours" 
+                                       min="0" max="23" value="0" required>
+                            </div>
+                        </div>
+                        <small>Fox will automatically expire if not found by this time</small>
+                    </div>
+                    
+                    <input type="hidden" name="hidden_by" value="<?php echo $_SESSION['user_id']; ?>">
+                    
+                    <div class="form-actions">
+                        <button type="submit" class="btn btn-primary">Hide Fox</button>
+                        <a href="index.php" class="btn btn-secondary">Cancel</a>
+                    </div>
+                </form>
+                
+                <div class="info-box">
+                    <h4>📝 Instructions for Hiding a Fox</h4>
+                    <ol>
+                        <li><strong>Grid Square:</strong> The 6-character location where you'll hide the transmitter</li>
+                        <li><strong>Frequency:</strong> Operating frequency in MHz (e.g., 146.520 for 2m FM)</li>
+                        <li><strong>Mode:</strong> Transmission mode (FM, SSB, CW, AM, etc.)</li>
+                        <li><strong>RF Power:</strong> Transmitter power level (e.g., 5W for QRP, 10W for standard)</li>
+                        <li><strong>Notes:</strong> Optional hint for hunters (e.g., "Near oak tree")</li>
+                        <li><strong>Expiration:</strong> How long the fox will remain active if not found</li>
+                        <li>After submitting, you'll get an 8-digit serial number to keep secret</li>
+                        <li>Share only the grid square, frequency, and mode with hunters, never the serial number!</li>
+                    </ol>
+                </div>
+            </div>
+        <?php endif; ?>
+    </div>
+</body>
+</html>
