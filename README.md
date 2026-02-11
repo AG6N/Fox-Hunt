@@ -1,4 +1,9 @@
-This code was 100% slopped together with AI.  I'm sure you can tell by the readme below, and by reviewing the actual code.  It will probably break in 100 different ways, but it does work as a proof of concept for an idea that I had.
+I am not a programmer.  This code was 100% slopped together with AI.  I'm sure you can tell by the readme below, and by reviewing the actual code.  While I didn't do any actual, real work on this, I did learn some mechanics of PHP and SQL, so that's a win for me.
+
+The application will probably break in 100 different ways that I have not discovered, but it does work as a proof of concept for an idea that I had while sitting in the grass on a warm sunny day.  That idea is to gameify transmitter fox hunting.  Anyone can create an account and hide a new fox.  The fox is given a serial number which should be attached to the transmiter.  When someone else finds the fox, they take note of the serial number and enter it into the app under their account.  If the serial numbers match, the finder get points...  
+
+If your club is hosting a fox hunt event, this will probably be good enough to assign serial numbers to transmitters, and track who found what in one place.
+
 
 
 # Foxhunt - Radio Transmitter Hunting Game v2.1
