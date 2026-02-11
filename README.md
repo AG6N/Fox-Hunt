@@ -1,3 +1,6 @@
+This code was 100% slopped together with AI.  I'm sure you can tell by the readme below, and by reviewing the actual code.  It will probably break in 100 different ways, but it does work as a proof of concept for an idea that I had.
+
+
 # Foxhunt - Radio Transmitter Hunting Game v2.1
 
 ## Description
